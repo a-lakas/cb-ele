@@ -613,7 +613,9 @@ def compute_metrics_v4(
 # SIMULATION
 # =============================================================================
 
-def run_simulation(config=CONFIG):
+def run_simulation(config=CONFIG, return_trajectory=False):
+    """Run CB-ELE.  With `return_trajectory`, also return per-round
+    positions, realised velocities and states (see `compare.py`)."""
     config = _as_config(config)
     t_start = time.perf_counter()
 
@@ -649,6 +651,10 @@ def run_simulation(config=CONFIG):
 
     metric_matrix = np.zeros((config.rounds, len(METRIC_KEYS)), dtype=float)
     metric_leader_ids = ["-"] * config.rounds
+    if return_trajectory:
+        traj_position = np.zeros((config.rounds, n, 2))
+        traj_velocity = np.zeros((config.rounds, n, 2))
+        traj_state = np.zeros((config.rounds, n), dtype=np.int8)
     event_log = []
     leader_transitions = []
 
@@ -932,6 +938,7 @@ def run_simulation(config=CONFIG):
             if safe.any():
                 heading[np.flatnonzero(leader_mask)[safe]] = np.arctan2(dy[safe], dx[safe])
 
+        position_before = position
         position = position + velocity
         observed_speed = actual_speed.copy()
 
@@ -941,6 +948,11 @@ def run_simulation(config=CONFIG):
         at_y_wall = (position[:, 1] <= 0.0) | (position[:, 1] >= config.height)
         heading[at_x_wall] = np.pi - heading[at_x_wall]
         heading[at_y_wall] = -heading[at_y_wall]
+
+        if return_trajectory:
+            traj_position[round_number] = position
+            traj_velocity[round_number] = position - position_before
+            traj_state[round_number] = state
 
         distance = pairwise_distances(position, use_scipy=use_scipy)
         np.fill_diagonal(distance, np.inf)
@@ -992,6 +1004,10 @@ def run_simulation(config=CONFIG):
         if config.reelection_enabled:
             print(f"[v4.4] Re-election fired: {reelection_fired}")
 
+    if return_trajectory:
+        trajectory = {"position": traj_position, "velocity": traj_velocity,
+                      "state": traj_state, "goal": goal}
+        return display_frames, goal, table, events_df, transitions_df, trajectory
     return display_frames, goal, table, events_df, transitions_df
 
 
