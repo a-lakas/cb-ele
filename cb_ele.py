@@ -1,6 +1,13 @@
 """CB-ELE v4.4: collision election with mid-run re-election experiment.
 
-Repository version: v0.1.
+Repository version: v0.2.
+
+v0.2
+----
+- Re-election seeds candidates on the goal side of the swarm
+  (`reelection_seed_mode = "goal_side"`); the v0.1 peripheral seeding
+  picked rear drones, whose leader trailed and split the swarm.
+- Default rounds 1700 -> 1350 (seed 42: mission stable from 1257).
 
 v0.1
 ----
@@ -89,7 +96,7 @@ class Config:
     n_agents: int = 30
     width: float = 1000.0
     height: float = 100.0
-    rounds: int = 1700                       # v0.1: swarm arrives ~1100, mission stable ~1620 (seed 42)
+    rounds: int = 1350                       # v0.2: mission stable from 1257 (seed 42)
     seed: int = 42
     fps: int = 20
     animation_stride: int = 12
@@ -162,6 +169,7 @@ class Config:
                                              # initial centroid distance remains
     reelection_demote_target: str = "FOLLOWER"   # "DORMANT" | "FOLLOWER" | "CANDIDATE"
     reelection_seed_candidates: int = 5
+    reelection_seed_mode: str = "goal_side"  # v0.2: "goal_side" | "peripheral"
     reelection_block_ex_leader_rounds: int = 180
 
     # Performance knobs ------------------------------------------------------
@@ -458,7 +466,7 @@ def resolve_duel_expirations(state, duel_active, duel_timer, election_contacts):
 def trigger_reelection(state, confidence, leader_age, anomaly_counter,
                        state_age, duel_active, duel_timer, collision_history,
                        promotion_cooldown, position,
-                       event_log, round_number, rng, config):
+                       event_log, round_number, rng, config, goal=None):
     """v4.4: mid-run re-election. Demote current leader(s), seed candidates."""
     target_map = {"DORMANT": DORMANT, "FOLLOWER": FOLLOWER, "CANDIDATE": CANDIDATE}
     target = target_map.get(config.reelection_demote_target, FOLLOWER)
@@ -483,7 +491,12 @@ def trigger_reelection(state, confidence, leader_age, anomaly_counter,
         followers = np.flatnonzero(eligible)
         if len(followers):
             centroid = position[followers].mean(axis=0)
-            d = np.linalg.norm(position[followers] - centroid, axis=1)
+            offset = position[followers] - centroid
+            if config.reelection_seed_mode == "goal_side" and goal is not None:
+                # v0.2: front of the swarm, i.e. farthest along centroid->goal
+                d = offset @ unit(goal - centroid)
+            else:
+                d = np.linalg.norm(offset, axis=1)
             order = np.argsort(-d)                      # farthest first
             seeds = followers[order[:config.reelection_seed_candidates]]
             for i in seeds:
@@ -663,7 +676,7 @@ def run_simulation(config=CONFIG):
                     state, confidence, leader_age, anomaly_counter,
                     state_age, duel_active, duel_timer, collision_history,
                     promotion_cooldown, position,
-                    event_log, round_number, rng, config,
+                    event_log, round_number, rng, config, goal=goal,
                 )
                 reelection_fired = True
         promotion_cooldown = np.maximum(promotion_cooldown - 1, 0)
