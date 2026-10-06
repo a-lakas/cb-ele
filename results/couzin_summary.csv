@@ -1,0 +1,2 @@
+method,seed,informed_fraction,success,completion_time,mission_progress,order,heading_accuracy,cluster_velocity_ratio,min_distance_mean,min_distance_overall,collisions,safety_breaches,swarm_radius,mean_pair_distance,fragmented_fraction,isolated_fraction,fragmented_at_end
+couzin,42,0.3,False,,0.8571275029668279,0.23824605773575327,0.8141960021155256,0.31202337823632975,8.885811347097578,4.9904948700686305,0,0,260.1891593194558,182.83530353573602,0.745,0.0,True

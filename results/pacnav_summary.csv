@@ -1,0 +1,2 @@
+method,seed,informed_fraction,success,completion_time,mission_progress,order,heading_accuracy,cluster_velocity_ratio,min_distance_mean,min_distance_overall,collisions,safety_breaches,swarm_radius,mean_pair_distance,fragmented_fraction,isolated_fraction,fragmented_at_end
+pacnav,42,0.3,True,2018,0.987235509883243,0.6295205453610867,0.8902068445295689,0.35060883195471676,8.148302515943213,4.904657629762937,0,12,107.87237405329206,50.37833176627734,0.45468053491827637,0.001271256397556546,False
