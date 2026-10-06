@@ -1,10 +1,11 @@
 # CB-ELE — Collision-Based Leader Election for GPS/communication-denied UAV swarms
 
-Current version **v0.2** (simulator CB-ELE v4.4: collision election,
+Current version **v0.3** (simulator CB-ELE v4.4: collision election,
 mid-distance re-election experiment, follower catch-up boost).
 
 | version | changes |
 |---|---|
+| v0.3 | PACNav and Couzin baselines, common metrics from the paper review, 100-seed benchmark, per-baseline animation scripts |
 | v0.2 | re-election candidates seeded on the goal side of the swarm (no leader trailing / swarm split); 1350 rounds |
 | v0.1 | re-election no longer re-seeds the demoted leader; 1700 rounds; GIF figure height doubled |
 | v0.0 | baseline import, headless server execution |
