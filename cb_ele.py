@@ -1,6 +1,14 @@
 """CB-ELE v4.4: collision election with mid-run re-election experiment.
 
-Repository version: v0.4.
+Repository version: v0.5.
+
+v0.5
+----
+- Behavioural leader recognition (`leader_recognition = "follow"`): each
+  drone infers the leader from protocol behaviour it can observe (freezing
+  when touched, backing away, winning duels); followers steer to their
+  believed leader and leaders close in on recognised rivals.  See
+  docs/leader_recognition.md.
 
 v0.4
 ----
@@ -146,7 +154,7 @@ class Config:
     # "off": no recognition; "observe": scores only (for accuracy);
     # "follow": followers steer to their believed leader and a leader that
     # recognises another leader closes in to duel it.
-    leader_recognition: str = "off"
+    leader_recognition: str = "follow"
     recognition_decay: float = 0.995
     recognition_win_weight: float = 3.0
     recognition_freeze_weight: float = 1.0
