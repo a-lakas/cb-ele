@@ -1,6 +1,15 @@
 """CB-ELE v4.4: collision election with mid-run re-election experiment.
 
-Repository version: v0.0 (baseline import of CB-ELE v4.4).
+Repository version: v0.1.
+
+v0.1
+----
+- Re-election no longer re-seeds the just-demoted leader as a candidate
+  (it was re-promoted as soon as its cooldown expired).
+- Default rounds 3000 -> 1700 (seed 42: swarm in goal zone at ~1110,
+  mission stable from 1624).
+- Animation figure height doubled (15 x 16 in); swarm panel uses
+  aspect='auto', so the y axis is stretched relative to x.
 
 Changes vs v4.3
 ---------------
@@ -80,7 +89,7 @@ class Config:
     n_agents: int = 30
     width: float = 1000.0
     height: float = 100.0
-    rounds: int = 3000
+    rounds: int = 1700                       # v0.1: swarm arrives ~1100, mission stable ~1620 (seed 42)
     seed: int = 42
     fps: int = 20
     animation_stride: int = 12
@@ -468,7 +477,10 @@ def trigger_reelection(state, confidence, leader_age, anomaly_counter,
         event_log.append((round_number, int(i), "reelection_demote"))
 
     if config.reelection_seed_candidates > 0:
-        followers = np.flatnonzero(state == FOLLOWER)
+        # v0.1: never re-seed the leader(s) just demoted
+        eligible = (state == FOLLOWER)
+        eligible[leaders] = False
+        followers = np.flatnonzero(eligible)
         if len(followers):
             centroid = position[followers].mean(axis=0)
             d = np.linalg.norm(position[followers] - centroid, axis=1)
@@ -1109,14 +1121,14 @@ def create_animation(config=CONFIG):
     except ImportError:
         pass
 
-    fig = plt.figure(figsize=(15, 8), dpi=80, constrained_layout=True)
+    fig = plt.figure(figsize=(15, 16), dpi=80, constrained_layout=True)
     grid = fig.add_gridspec(2, 2, height_ratios=[1.9, 1.0])
     swarm_ax = fig.add_subplot(grid[0, :])
     state_ax = fig.add_subplot(grid[1, 0])
     performance_ax = fig.add_subplot(grid[1, 1])
 
     swarm_ax.set(xlim=(-4, config.width + 4), ylim=(-2, config.height + 2),
-                 aspect="equal", xlabel="x (m)", ylabel="y (m)")
+                 aspect="auto", xlabel="x (m)", ylabel="y (m)")
     swarm_ax.set_facecolor("#fafafa")
     swarm_ax.grid(True, linestyle=":", alpha=0.25)
     swarm_ax.scatter(*goal, marker="X", s=210, color="limegreen", edgecolors="black")

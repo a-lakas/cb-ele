@@ -1,7 +1,12 @@
 # CB-ELE — Collision-Based Leader Election for GPS/communication-denied UAV swarms
 
-Version **v0.0**: baseline import of the CB-ELE v4.4 simulator (collision election,
+Current version **v0.1** (simulator CB-ELE v4.4: collision election,
 mid-distance re-election experiment, follower catch-up boost).
+
+| version | changes |
+|---|---|
+| v0.1 | re-election no longer re-seeds the demoted leader; 1700 rounds; GIF figure height doubled |
+| v0.0 | baseline import, headless server execution |
 
 ## Run locally / on a server
 
@@ -24,7 +29,7 @@ Useful flags: `--rounds`, `--seed`, `--n-agents`, `--no-reelection`,
 `--no-animation` (CSV only), `--animation-file x.mp4` (needs ffmpeg),
 `--sweep N` (seed sweep → `cb_ele_sweep.csv`).
 
-A full 3000-round run takes about 20 s of simulation + about 4.5 min of GIF rendering on one CPU.
+A full 1700-round run takes about 12 s of simulation + about 3.5 min of GIF rendering on one CPU.
 
 ## Self-hosted GitHub Actions runner
 
@@ -34,4 +39,4 @@ GIF as a build artifact.
 
 ## Reference run
 
-`results/` holds the v0.0 reference run (seed 42, 3000 rounds, 30 agents).
+`results/` holds the v0.0 reference run (seed 42, 1700 rounds, 30 agents).
