@@ -52,7 +52,7 @@ Metric definitions are in [`docs/metrics.md`](docs/metrics.md), and the paper no
 
 ## Related work
 
-See [`docs/related_work.md`](docs/related_work.md) for the competitor literature.
+See [`docs/related_work.md`](docs/related_work.md) for the competitor literature and [`docs/literature_questions.md`](docs/literature_questions.md) for why leaders, GPS-free navigation and collision-based election prior art.
 
 ## Reference run
 
