@@ -138,6 +138,22 @@ class Config:
     # observed speed is below this; it notices a departure after the latency.
     hover_speed_threshold: float = 0.05      # m/s
     perception_latency: float = 0.1          # s (fraction of a 1 s round)
+
+    # v0.5: behavioural leader recognition (no signal, no IDs exchanged).
+    # Each drone scores every neighbour it can see from protocol behaviour:
+    # freezing when touched (+), backing away when touched (-), and staying
+    # put while the duel partner leaves, i.e. winning a duel (++).
+    # "off": no recognition; "observe": scores only (for accuracy);
+    # "follow": followers steer to their believed leader and a leader that
+    # recognises another leader closes in to duel it.
+    leader_recognition: str = "off"
+    recognition_decay: float = 0.995
+    recognition_win_weight: float = 3.0
+    recognition_freeze_weight: float = 1.0
+    recognition_retreat_weight: float = 2.0
+    recognition_threshold: float = 2.0
+    recognition_cap: float = 50.0
+    recognition_follow_weight: float = 3.0
     passive_backoff_min: int = 4
     passive_backoff_max: int = 12
 
@@ -655,6 +671,14 @@ def run_simulation(config=CONFIG, return_trajectory=False):
         n, size=int(round(config.follower_informed_fraction * n)),
         replace=False)] = True
 
+    # v0.5: behavioural leader recognition state
+    score = np.zeros((n, n))                       # score[i, j]: i's view of j
+    belief = np.full(n, -1)                        # i's believed leader
+    contacts_prev = np.zeros((n, n), dtype=bool)   # contacts at last round start
+    hover_prev = np.zeros(n, dtype=bool)           # hovering two motions ago
+    recog_precision = np.full(config.rounds, np.nan)
+    recog_recall = np.full(config.rounds, np.nan)
+
     # v4.4: baseline centroid distance, for the mid-run reelection trigger
     initial_centroid_distance = float(np.linalg.norm(position.mean(axis=0) - goal))
     reelection_fired = False
@@ -724,6 +748,37 @@ def run_simulation(config=CONFIG, return_trajectory=False):
         # `perception_latency` later, so the later timer pauses instead of
         # expiring.  Timers expiring within the latency both withdraw.
         hovering = observed_speed < config.hover_speed_threshold
+
+        if config.leader_recognition != "off":
+            # Events of the last motion step, as seen from outside.
+            touched = contacts_prev.any(axis=1)
+            freeze = touched & hovering
+            retreat = touched & ~hovering
+            win = (contacts_prev & hover_prev[:, None] & hover_prev[None, :]
+                   & hovering[:, None] & ~hovering[None, :])        # j stayed, k left
+            visible = neighbors.astype(float)
+            evidence = (config.recognition_freeze_weight * freeze
+                        - config.recognition_retreat_weight * retreat)
+            score = config.recognition_decay * score + visible * (
+                evidence[None, :]
+                + config.recognition_win_weight * (visible @ win.T.astype(float)))
+            np.clip(score, 0.0, config.recognition_cap, out=score)
+            np.fill_diagonal(score, 0.0)
+            masked = np.where(neighbors, score, -1.0)
+            best = masked.argmax(axis=1)
+            belief = np.where(masked[np.arange(n), best]
+                              >= config.recognition_threshold, best, -1)
+            followers = state == FOLLOWER
+            is_leader = state == LEADER
+            sees_leader = followers & (neighbors & is_leader[None, :]).any(axis=1)
+            has_belief = followers & (belief >= 0)
+            correct = has_belief & is_leader[np.maximum(belief, 0)]
+            if has_belief.any():
+                recog_precision[round_number] = correct.sum() / has_belief.sum()
+            if sees_leader.any():
+                recog_recall[round_number] = (correct & sees_leader).sum() / sees_leader.sum()
+        contacts_prev = election_contacts.copy()
+        hover_prev = hovering.copy()
         for i in range(n):
             if state[i] in (CANDIDATE, LEADER):
                 if contact_now[i] and not duel_active[i]:
@@ -874,6 +929,15 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                         + config.separation_weight * close_avoidance
                         + config.follower_goal_weight * informed[i] * goal_direction
                     )
+                    b = belief[i]
+                    if config.leader_recognition == "follow" and b >= 0:
+                        to_b = position[b] - position[i]
+                        d_b = float(np.linalg.norm(to_b))
+                        pull = np.clip((d_b - config.preferred_spacing)
+                                       / config.preferred_spacing, 0.0, 1.0)
+                        desired[i] += config.recognition_follow_weight * (
+                            pull * unit(to_b)
+                            + np.array([np.cos(heading[b]), np.sin(heading[b])]))
                     # *** v4.4 FIX: catch-up boost for lagging followers ***
                     if len(ids):
                         nn_dist = float(np.min(distance[i, ids]))
@@ -899,6 +963,13 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                     log_gate = 1.0
                     log_tether = 1.0
                     log_agreement = 1.0
+                elif (config.leader_recognition == "follow" and belief[i] >= 0
+                      and not auditing):
+                    # v0.5: a recognised rival leader -> close in and duel
+                    heading[i] = goal_angle
+                    desired[i] = unit(position[belief[i]] - position[i])
+                    speed[i] = config.leader_cruise_speed
+                    log_gate = log_tether = log_agreement = np.nan
                 elif auditing and len(ids):
                     heading[i] = goal_angle
                     desired[i] = unit(position[ids].mean(axis=0) - position[i])
@@ -1005,6 +1076,8 @@ def run_simulation(config=CONFIG, return_trajectory=False):
     table = pd.DataFrame(metric_matrix, columns=METRIC_KEYS)
     table["round"] = np.arange(config.rounds)
     table["leader_ids"] = metric_leader_ids
+    table["recognition_precision"] = recog_precision
+    table["recognition_recall"] = recog_recall
     for key in METRIC_BOOL:
         table[key] = table[key].astype(bool)
 
@@ -1169,7 +1242,7 @@ def create_animation(config=CONFIG):
     except ImportError:
         pass
 
-    fig = plt.figure(figsize=(15, 16), dpi=80, constrained_layout=True)
+    fig = plt.figure(figsize=(22, 10), dpi=80, constrained_layout=True)
     grid = fig.add_gridspec(2, 2, height_ratios=[1.9, 1.0])
     swarm_ax = fig.add_subplot(grid[0, :])
     state_ax = fig.add_subplot(grid[1, 0])
@@ -1361,6 +1434,12 @@ def parse_args(argv=None):
                         help="run the simulation and write CSV only")
     parser.add_argument("--no-reelection", action="store_true",
                         help="disable the mid-distance re-election experiment")
+    parser.add_argument("--recognition", choices=["off", "observe", "follow"],
+                        default=CONFIG.leader_recognition,
+                        help="behavioural leader recognition (v0.5)")
+    parser.add_argument("--informed", type=float,
+                        default=CONFIG.follower_informed_fraction,
+                        help="fraction of followers that steer to the goal")
     parser.add_argument("--sweep", type=int, metavar="N", default=0,
                         help="run a seed sweep over seeds 0..N-1 instead")
     return parser.parse_args(argv)
@@ -1376,6 +1455,8 @@ def main(argv=None):
         output_dir=args.output_dir,
         animation_file=args.animation_file,
         reelection_enabled=not args.no_reelection,
+        leader_recognition=args.recognition,
+        follower_informed_fraction=args.informed,
         show_inline=False,
     )
     if args.sweep > 0:

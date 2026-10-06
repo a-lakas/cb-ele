@@ -77,7 +77,7 @@ def animate(method, traj, table, summary, config, args):
     frames = sorted(set(range(0, rounds, args.stride)) | {rounds - 1})
     colors = np.where(informed, INFORMED_COLOR, UNINFORMED_COLOR)
 
-    fig = plt.figure(figsize=(15, 16), dpi=80, constrained_layout=True)
+    fig = plt.figure(figsize=(22, 10), dpi=80, constrained_layout=True)
     grid = fig.add_gridspec(2, 2, height_ratios=[1.9, 1.0])
     ax = fig.add_subplot(grid[0, :])
     left = fig.add_subplot(grid[1, 0])
