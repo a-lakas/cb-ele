@@ -1,6 +1,21 @@
 """CB-ELE v4.4: collision election with mid-run re-election experiment.
 
-Repository version: v0.2.
+Repository version: v0.4.
+
+v0.4
+----
+- Duels are resolved with local information only.  Each drone knows only
+  its own timer; it counts down while a contacting neighbour is seen
+  hovering, withdraws when its own timer runs out, and survives when the
+  contact ends.  The previous central arbitration (one loser per contact
+  group, chosen by comparing timers) is removed.  Departures are noticed
+  after `perception_latency`; timers expiring within it both withdraw.
+- Leaders no longer use the global leader count/positions: duplicate
+  leaders settle it when they meet (validation phase or at the goal).
+
+v0.3
+----
+- `follower_informed_fraction`, trajectory recording (`compare.py`).
 
 v0.2
 ----
@@ -119,6 +134,10 @@ class Config:
     leader_audit_rounds: int = 0
     duel_timer_min: float = 1.0
     duel_timer_max: float = 8.0
+    # v0.4: local duel rules. A drone sees a neighbour as hovering when its
+    # observed speed is below this; it notices a departure after the latency.
+    hover_speed_threshold: float = 0.05      # m/s
+    perception_latency: float = 0.1          # s (fraction of a 1 s round)
     passive_backoff_min: int = 4
     passive_backoff_max: int = 12
 
@@ -452,19 +471,6 @@ def leader_connectivity_tether(agent, distance, neighbors, config):
     ))
 
 
-def resolve_duel_expirations(state, duel_active, duel_timer, election_contacts):
-    expired = []
-    for group in components(election_contacts):
-        contenders = [
-            i for i in group
-            if duel_active[i] and state[i] in (CANDIDATE, LEADER)
-        ]
-        ready = [i for i in contenders if duel_timer[i] <= 0]
-        if ready:
-            expired.append(min(ready, key=lambda i: duel_timer[i]))
-    return expired
-
-
 def trigger_reelection(state, confidence, leader_age, anomaly_counter,
                        state_age, duel_active, duel_timer, collision_history,
                        promotion_cooldown, position,
@@ -710,7 +716,14 @@ def run_simulation(config=CONFIG, return_trajectory=False):
             for i in failed:
                 event_log.append((round_number, int(i), "leader_failure"))
 
-        # --- Duel handshake ---
+        # --- Duel handshake (v0.4: local rules only) ---
+        # Each drone knows only its own timer.  It counts down while at least
+        # one contacting neighbour is seen hovering; it withdraws when its own
+        # timer runs out; it survives when contact ends.  A neighbour that
+        # withdraws starts moving at its expiry instant and is noticed
+        # `perception_latency` later, so the later timer pauses instead of
+        # expiring.  Timers expiring within the latency both withdraw.
+        hovering = observed_speed < config.hover_speed_threshold
         for i in range(n):
             if state[i] in (CANDIDATE, LEADER):
                 if contact_now[i] and not duel_active[i]:
@@ -721,16 +734,26 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                     duel_active[i] = False
                     duel_timer[i] = np.inf
                     event_log.append((round_number, i, "duel_survive"))
-                if duel_active[i]:
-                    contacts = np.flatnonzero(election_contacts[i])
-                    mutual_hold = any(
-                        duel_active[j] and state[j] in (CANDIDATE, LEADER)
-                        for j in contacts
-                    )
-                    if mutual_hold:
-                        duel_timer[i] -= 1.0
 
-        for loser in resolve_duel_expirations(state, duel_active, duel_timer, election_contacts):
+        duelers = [i for i in range(n)
+                   if duel_active[i] and state[i] in (CANDIDATE, LEADER)]
+        departure = {}                      # drone -> instant it starts leaving
+        losers = []
+        for i in sorted(duelers, key=lambda k: duel_timer[k]):
+            partners = [j for j in np.flatnonzero(election_contacts[i])
+                        if hovering[j]]
+            if not partners:
+                continue                    # nobody holding: countdown paused
+            seen_until = min(1.0, max(
+                departure[j] + config.perception_latency if j in departure else 1.0
+                for j in partners))
+            if duel_timer[i] <= seen_until:
+                departure[i] = max(duel_timer[i], 0.0)
+                losers.append(i)
+            else:
+                duel_timer[i] -= seen_until
+
+        for loser in losers:
             previous = state[loser]
             state[loser] = PASSIVE if previous == CANDIDATE else FOLLOWER
             backoff[loser] = rng.integers(config.passive_backoff_min,
@@ -861,53 +884,41 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                     local_speed = max(local_speed, config.follower_min_creep)
                     speed[i] = local_speed
             elif state[i] == LEADER:
-                n_leaders = int(np.sum(state == LEADER))
-                if n_leaders > 1:
-                    leader_positions = position[state == LEADER]
-                    leader_centroid = leader_positions.mean(axis=0)
-                    direction = leader_centroid - position[i]
-                    d = float(np.linalg.norm(direction))
-                    if d > 1e-6:
-                        desired[i] = direction / d
-                        speed[i] = config.leader_cruise_speed
-                    else:
-                        desired[i] = np.zeros(2)
-                        speed[i] = 0.0
-                    noise_allowed[i] = False
+                # v0.4: no global leader count; duplicate leaders meet during
+                # validation or at the goal and settle it in a duel.
+                distance_to_goal = float(np.linalg.norm(goal - position[i]))
+                auditing = leader_is_auditing(leader_age[i], distance_to_goal, config)
+                audit_mask[i] = auditing
+                noise_allowed[i] = False
+                goal_direction = unit(goal - position[i])
+                goal_angle = np.arctan2(goal_direction[1], goal_direction[0])
+                if distance_to_goal <= config.leader_anchor_radius:
+                    heading[i] = goal_angle
+                    desired[i] = np.array([np.cos(heading[i]), np.sin(heading[i])])
+                    speed[i] = 0.0
+                    log_gate = 1.0
+                    log_tether = 1.0
+                    log_agreement = 1.0
+                elif auditing and len(ids):
+                    heading[i] = goal_angle
+                    desired[i] = unit(position[ids].mean(axis=0) - position[i])
+                    speed[i] = config.candidate_speed
+                    log_gate = 1.0
+                    log_tether = 1.0
+                    log_agreement = 0.0
                 else:
-                    distance_to_goal = float(np.linalg.norm(goal - position[i]))
-                    auditing = leader_is_auditing(leader_age[i], distance_to_goal, config)
-                    audit_mask[i] = auditing
-                    noise_allowed[i] = False
-                    goal_direction = unit(goal - position[i])
-                    goal_angle = np.arctan2(goal_direction[1], goal_direction[0])
-                    if distance_to_goal <= config.leader_anchor_radius:
-                        heading[i] = goal_angle
-                        desired[i] = np.array([np.cos(heading[i]), np.sin(heading[i])])
-                        speed[i] = 0.0
-                        log_gate = 1.0
-                        log_tether = 1.0
-                        log_agreement = 1.0
-                    elif auditing and len(ids):
-                        heading[i] = goal_angle
-                        desired[i] = unit(position[ids].mean(axis=0) - position[i])
-                        speed[i] = config.candidate_speed
-                        log_gate = 1.0
-                        log_tether = 1.0
-                        log_agreement = 0.0
-                    else:
-                        heading[i] = goal_angle
-                        desired[i] = goal_direction
-                        agreement = (
-                            float(np.mean(np.cos(heading[ids] - goal_angle)))
-                            if len(ids) else 0.0
-                        )
-                        gate = np.clip((agreement + 1.0) / 2.0, config.leader_min_gate, 1.0)
-                        tether = leader_connectivity_tether(i, distance, neighbors, config)
-                        speed[i] = config.leader_cruise_speed * gate * tether
-                        log_gate = float(gate)
-                        log_tether = float(tether)
-                        log_agreement = float(agreement)
+                    heading[i] = goal_angle
+                    desired[i] = goal_direction
+                    agreement = (
+                        float(np.mean(np.cos(heading[ids] - goal_angle)))
+                        if len(ids) else 0.0
+                    )
+                    gate = np.clip((agreement + 1.0) / 2.0, config.leader_min_gate, 1.0)
+                    tether = leader_connectivity_tether(i, distance, neighbors, config)
+                    speed[i] = config.leader_cruise_speed * gate * tether
+                    log_gate = float(gate)
+                    log_tether = float(tether)
+                    log_agreement = float(agreement)
             elif state[i] == CHALLENGER:
                 desired[i] = (unit(position[ids].mean(axis=0) - position[i])
                               if len(ids) else np.zeros(2))
@@ -939,7 +950,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
         )
 
         leader_mask = state == LEADER
-        if leader_mask.any() and int(leader_mask.sum()) == 1:
+        if leader_mask.any():                       # v0.4: per leader, local
             dx = goal[0] - position[leader_mask, 0]
             dy = goal[1] - position[leader_mask, 1]
             safe = np.hypot(dx, dy) > 1e-6
