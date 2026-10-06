@@ -139,6 +139,8 @@ class Config:
     cohesion_weight: float = 0.50
     separation_weight: float = 2.2
     follower_goal_weight: float = 2.0
+    follower_informed_fraction: float = 1.0  # v0.3: share of followers that
+                                             # steer to the goal (leader always does)
     follower_catchup_gain: float = 2.0       # v4.4: lagging-follower speed boost
 
     connectivity_guard_radius: float = 30.0
@@ -640,6 +642,12 @@ def run_simulation(config=CONFIG, return_trajectory=False):
     duel_timer = np.full(n, np.inf)
     collision_history = np.zeros((config.collision_window, n), dtype=bool)
     promotion_cooldown = np.zeros(n, dtype=int)     # v4.4
+    # v0.3: informed followers; separate RNG keeps the main stream unchanged
+    informed = np.zeros(n, dtype=bool)
+    informed_rng = np.random.default_rng([config.seed, 1])
+    informed[informed_rng.choice(
+        n, size=int(round(config.follower_informed_fraction * n)),
+        replace=False)] = True
 
     # v4.4: baseline centroid distance, for the mid-run reelection trigger
     initial_centroid_distance = float(np.linalg.norm(position.mean(axis=0) - goal))
@@ -841,7 +849,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                         config.alignment_weight * local_alignment(i, heading, neighbors)
                         + config.cohesion_weight * keep_connected
                         + config.separation_weight * close_avoidance
-                        + config.follower_goal_weight * goal_direction
+                        + config.follower_goal_weight * informed[i] * goal_direction
                     )
                     # *** v4.4 FIX: catch-up boost for lagging followers ***
                     if len(ids):

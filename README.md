@@ -38,6 +38,17 @@ A full 1350-round run takes about 10 s of simulation + about 3 min of GIF render
 (manual trigger: *Actions → CB-ELE simulation → Run workflow*) and uploads the CSV and
 GIF as a build artifact.
 
+## Benchmark against baselines
+
+```bash
+.venv/bin/python compare.py --seeds 100 --rounds 3000 --informed 1.0,0.3
+```
+
+This runs CB-ELE, PACNav (Ahmad et al. 2022) and Couzin et al. (2005) on identical starts
+(`baselines.py`), and writes `comparison_per_seed.csv` and `comparison_summary.csv`.
+Metric definitions are in [`docs/metrics.md`](docs/metrics.md), and the paper notes are in
+[`docs/paper_review.md`](docs/paper_review.md).
+
 ## Related work
 
 See [`docs/related_work.md`](docs/related_work.md) for the competitor literature.
