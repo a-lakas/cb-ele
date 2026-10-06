@@ -1,0 +1,31 @@
+name: CB-ELE simulation
+
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "Simulation rounds"
+        default: "3000"
+      seed:
+        description: "Random seed"
+        default: "42"
+
+jobs:
+  simulate:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+      - name: Run simulation
+        run: |
+          .venv/bin/python cb_ele.py --output-dir results \
+            --rounds "${{ inputs.rounds }}" --seed "${{ inputs.seed }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cb-ele-results
+          path: |
+            results/cb_ele_metrics.csv
+            results/cb_ele_animation.gif

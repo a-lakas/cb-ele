@@ -1,0 +1,6 @@
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7
+pillow>=9.0
+scipy>=1.10      # optional: faster pairwise distances
+# numba>=0.58    # optional: faster hard-safety projection
