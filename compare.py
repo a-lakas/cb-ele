@@ -167,6 +167,10 @@ def main(argv=None):
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         for k, row in enumerate(pool.map(run_one, tasks), 1):
             rows.append(row)
+            if k % 5 == 0 or k == len(tasks):        # save progress as we go
+                os.makedirs(args.output_dir, exist_ok=True)
+                pd.DataFrame(rows).to_csv(os.path.join(
+                    args.output_dir, f"{args.prefix}_partial.csv"), index=False)
             if k % 10 == 0 or k == len(tasks):
                 print(f"[{k}/{len(tasks)}] {time.perf_counter() - t0:.0f} s",
                       flush=True)
@@ -184,6 +188,9 @@ def main(argv=None):
     summary.columns = [f"{a}_{b}" for a, b in summary.columns]
     summary_path = os.path.join(args.output_dir, f"{args.prefix}_summary.csv")
     summary.to_csv(summary_path, float_format="%.4f")
+    partial = os.path.join(args.output_dir, f"{args.prefix}_partial.csv")
+    if os.path.exists(partial):
+        os.remove(partial)
     print(f"\nWritten {per_seed} and {summary_path}\n")
     print(grouped.mean().T.to_string(float_format=lambda v: f"{v:.3f}"))
 
