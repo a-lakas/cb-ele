@@ -159,7 +159,11 @@ class Config:
     recognition_win_weight: float = 3.0
     recognition_freeze_weight: float = 1.0
     recognition_retreat_weight: float = 2.0
-    recognition_threshold: float = 2.0
+    recognition_slow_weight: float = 0.5     # v0.6: per-round evidence for
+                                             # moving slower than the observer's
+                                             # visible neighbours (the leader's
+                                             # gate/tether make it wait)
+    recognition_threshold: float = 5.0
     recognition_cap: float = 50.0
     recognition_follow_weight: float = 3.0
     passive_backoff_min: int = 4
@@ -767,8 +771,13 @@ def run_simulation(config=CONFIG, return_trajectory=False):
             visible = neighbors.astype(float)
             evidence = (config.recognition_freeze_weight * freeze
                         - config.recognition_retreat_weight * retreat)
+            # Slowness relative to what observer i sees around it.
+            n_vis = np.maximum(visible.sum(axis=1), 1.0)
+            reference = (visible @ observed_speed) / n_vis
+            slowness = (reference[:, None] - observed_speed[None, :]) / config.max_speed
             score = config.recognition_decay * score + visible * (
                 evidence[None, :]
+                + config.recognition_slow_weight * slowness
                 + config.recognition_win_weight * (visible @ win.T.astype(float)))
             np.clip(score, 0.0, config.recognition_cap, out=score)
             np.fill_diagonal(score, 0.0)
