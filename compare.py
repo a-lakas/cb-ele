@@ -114,8 +114,8 @@ def trajectory_metrics(traj, config, arrival_radius, hold_rounds=30):
 
 
 def run_one(task):
-    method, informed, seed, rounds, arrival_radius = task
-    cfg = replace(cb_ele.CONFIG, seed=seed, rounds=rounds,
+    method, informed, seed, rounds, arrival_radius, n_agents = task
+    cfg = replace(cb_ele.CONFIG, seed=seed, rounds=rounds, n_agents=n_agents,
                   verbose_timing=False, show_inline=False)
     t0 = time.perf_counter()
     if method == "cb-ele":
@@ -129,7 +129,7 @@ def run_one(task):
         for key in ("election_time", "unique_leader_fraction", "leader_changes"):
             row[key] = np.nan
     row.update(method=method, informed_fraction=informed, seed=seed,
-               runtime_s=time.perf_counter() - t0)
+               n_agents=n_agents, arrival_radius=arrival_radius, runtime_s=time.perf_counter() - t0)
     return row
 
 
@@ -142,11 +142,18 @@ def main(argv=None):
     parser.add_argument("--methods", default=",".join(METHODS))
     parser.add_argument("--arrival-radius", type=float, default=60.0,
                         help="R_g: all agents within it = completion")
+    parser.add_argument("--sizes", default=str(cb_ele.CONFIG.n_agents),
+                        help="comma-separated swarm sizes; R_g scales as "
+                             "arrival_radius * sqrt(N / 30) so the swarm fits")
+    parser.add_argument("--prefix", default="comparison",
+                        help="output file prefix")
     parser.add_argument("--workers", type=int, default=os.cpu_count())
     parser.add_argument("--output-dir", default="results")
     args = parser.parse_args(argv)
 
-    tasks = [(m, float(p), s, args.rounds, args.arrival_radius)
+    tasks = [(m, float(p), s, args.rounds,
+              args.arrival_radius * np.sqrt(int(n) / 30.0), int(n))
+             for n in args.sizes.split(",")
              for p in args.informed.split(",")
              for m in args.methods.split(",")
              for s in range(args.seeds)]
@@ -160,17 +167,17 @@ def main(argv=None):
                       flush=True)
 
     table = pd.DataFrame(rows)
-    front = ["informed_fraction", "method", "seed"]
+    front = ["n_agents", "informed_fraction", "method", "seed"]
     table = table[front + [c for c in table.columns if c not in front]]
     os.makedirs(args.output_dir, exist_ok=True)
-    per_seed = os.path.join(args.output_dir, "comparison_per_seed.csv")
+    per_seed = os.path.join(args.output_dir, f"{args.prefix}_per_seed.csv")
     table.to_csv(per_seed, index=False, float_format="%.4f")
 
     grouped = table.drop(columns="seed").groupby(
-        ["informed_fraction", "method"], sort=False)
+        ["n_agents", "informed_fraction", "method"], sort=False)
     summary = grouped.agg(["mean", "std"])
     summary.columns = [f"{a}_{b}" for a, b in summary.columns]
-    summary_path = os.path.join(args.output_dir, "comparison_summary.csv")
+    summary_path = os.path.join(args.output_dir, f"{args.prefix}_summary.csv")
     summary.to_csv(summary_path, float_format="%.4f")
     print(f"\nWritten {per_seed} and {summary_path}\n")
     print(grouped.mean().T.to_string(float_format=lambda v: f"{v:.3f}"))
