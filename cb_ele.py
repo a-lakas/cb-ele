@@ -1,6 +1,18 @@
 """CB-ELE v4.4: collision election with mid-run re-election experiment.
 
-Repository version: v0.6.
+Repository version: v0.8.
+
+v0.8
+----
+- Only a hovering drone counts as a rival: touches by moving drones do not
+  reset a candidate's quiet rounds or hold it in a duel (fixes the
+  80-drone launch deadlock).  The challenger watchdog runs only after the
+  follower has recognised a leader.
+
+v0.7
+----
+- Start area grows with N; drones settle inside goal_settle_radius (no new
+  elections at the goal).
 
 v0.6
 ----
@@ -237,6 +249,15 @@ class Config:
     # (no challenger watchdog, candidates/challengers revert to followers)
     # and informed followers stop pushing towards the goal point.  0 = off.
     goal_settle_radius: float = 100.0
+
+    # v0.8: a follower runs the "leader lost" watchdog only after it has
+    # recognised a leader (private flag, cleared when it becomes challenger).
+    # Without recognition ("off") the watchdog behaves as before.
+    watchdog_requires_leader: bool = True
+    # v0.8: only a hovering drone counts as a rival.  Duelling contenders
+    # hover; followers keep moving.  A touch by a moving drone neither
+    # resets a candidate's quiet rounds nor holds it in a duel.
+    rival_requires_hover: bool = True
 
     # Performance knobs ------------------------------------------------------
     hard_safety_iterations: int = 80
@@ -699,6 +720,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
     observed_speed = np.full(n, config.candidate_speed, dtype=float)
     duel_active = np.zeros(n, dtype=bool)
     duel_timer = np.full(n, np.inf)
+    duel_age = np.zeros(n, dtype=int)               # v0.8
     collision_history = np.zeros((config.collision_window, n), dtype=bool)
     promotion_cooldown = np.zeros(n, dtype=int)     # v4.4
     # v0.3: informed followers; separate RNG keeps the main stream unchanged
@@ -711,6 +733,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
     # v0.5: behavioural leader recognition state
     score = np.zeros((n, n))                       # score[i, j]: i's view of j
     belief = np.full(n, -1)                        # i's believed leader
+    had_leader = np.zeros(n, dtype=bool)           # v0.8: watchdog armed
     contacts_prev = np.zeros((n, n), dtype=bool)   # contacts at last round start
     hover_prev = np.zeros(n, dtype=bool)           # hovering two motions ago
     recog_precision = np.full(config.rounds, np.nan)
@@ -810,6 +833,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
             best = masked.argmax(axis=1)
             belief = np.where(masked[np.arange(n), best]
                               >= config.recognition_threshold, best, -1)
+            had_leader |= (state == FOLLOWER) & (belief >= 0)
             followers = state == FOLLOWER
             is_leader = state == LEADER
             sees_leader = followers & (neighbors & is_leader[None, :]).any(axis=1)
@@ -819,18 +843,32 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                 recog_precision[round_number] = correct.sum() / has_belief.sum()
             if sees_leader.any():
                 recog_recall[round_number] = (correct & sees_leader).sum() / sees_leader.sum()
+        # v0.8: rivals are touching drones seen hovering; a contact is new if
+        # that drone was not touching last round.
+        rival_contact = (election_contacts & hovering[None, :]).any(axis=1)
+        new_contact = (election_contacts & ~contacts_prev).any(axis=1)
+        if not config.rival_requires_hover:
+            rival_contact = contact_now.copy()
+            new_contact = contact_now.copy()
         contacts_prev = election_contacts.copy()
         hover_prev = hovering.copy()
         for i in range(n):
             if state[i] in (CANDIDATE, LEADER):
-                if contact_now[i] and not duel_active[i]:
+                if (contact_now[i] and not duel_active[i]
+                        and (new_contact[i] or rival_contact[i])):
                     duel_active[i] = True
+                    duel_age[i] = 0
                     duel_timer[i] = rng.uniform(config.duel_timer_min, config.duel_timer_max)
                     event_log.append((round_number, i, "duel_start"))
-                elif not contact_now[i] and duel_active[i]:
+                elif duel_active[i] and (
+                        not contact_now[i]
+                        or (config.rival_requires_hover and duel_age[i] >= 2
+                            and not rival_contact[i])):
                     duel_active[i] = False
                     duel_timer[i] = np.inf
                     event_log.append((round_number, i, "duel_survive"))
+                if duel_active[i]:
+                    duel_age[i] += 1
 
         duelers = [i for i in range(n)
                    if duel_active[i] and state[i] in (CANDIDATE, LEADER)]
@@ -888,7 +926,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                     state[i], confidence[i] = DORMANT, 0
                 elif promotion_cooldown[i] > 0:      # v4.4: ex-leader cooldown
                     confidence[i] = 0
-                elif not contact_now[i] and not duel_active[i]:
+                elif not rival_contact[i] and not duel_active[i]:
                     confidence[i] += 1
                     if confidence[i] >= config.candidate_silent_rounds:
                         state[i], confidence[i] = LEADER, 0
@@ -913,6 +951,8 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                 else:
                     anomalous = (
                         not settled[i]
+                        and (had_leader[i] or not config.watchdog_requires_leader
+                             or config.leader_recognition == "off")
                         and state_age[i] >= config.collision_window
                         and collision_rate[i] >= config.collision_rate_threshold
                         and coherence <= config.challenger_coherence_threshold
@@ -923,6 +963,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                         challenger_timer[i] = rng.integers(
                             config.challenger_delay_min, config.challenger_delay_max + 1)
                         anomaly_counter[i] = 0
+                        had_leader[i] = False
                         event_log.append((round_number, i, "challenger_enter"))
             elif previous_state[i] == CHALLENGER:
                 if not has_neighbors:

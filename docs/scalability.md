@@ -1,6 +1,56 @@
 # Scalability: swarm size 10–80
 
-## v0.7, 5 seeds per size
+## v0.8, 5 seeds per size (current)
+
+**v0.8 fixes the 80-drone launch deadlock described in the v0.7 section below.**
+
+1. **Only a hovering drone counts as a rival** (`rival_requires_hover`).
+   - Duelling contenders hover; followers keep moving.
+   - A touch by a moving drone no longer resets a candidate's quiet rounds.
+   - A duel ends, and the candidate survives, if one round after contact no touching
+     drone is hovering.
+   - This is the fix that matters. In a dense crowd, followers brushing past kept every
+     candidate frozen and its quiet count at zero, so no leader could emerge.
+2. **The "leader lost" watchdog runs only after the follower has recognised a leader**
+   (`watchdog_requires_leader`). This alone did not fix the deadlock: followers mistook
+   duelling candidates for leaders, so the watchdog still fired.
+
+Only CB-ELE was re-run. The baseline code is unchanged, so its rows are the same as in
+v0.7. Per-seed results are in `results/scalability_per_seed.csv` (the v0.7 CB-ELE rows are
+in `results/scalability_v07_per_seed.csv`); the chart is `results/scalability.png`.
+
+| N | Success: CB-ELE / PACNav / Couzin | Median completion: CB-ELE / PACNav | Order: CB-ELE / PACNav | Rounds split: CB-ELE / PACNav | CB-ELE: one leader at end |
+|---|---|---|---|---|---|
+| 10 | **100%** / 100% / 100% | **1328** / 1834 | 0.86 / 0.87 | 26% / **5%** | 100% |
+| 20 | **100%** / 100% / 0% | **1432** / 1888 | **0.87** / 0.77 | **2%** / 48% | 100% |
+| 30 | **100%** / 80% / 0% | **1368** / 1973 | **0.83** / 0.69 | **23%** / 26% | 100% |
+| 50 | **100%** / 60% / 0% | **1329** / 1905 | **0.83** / 0.54 | **5%** / 60% | 100% |
+| 80 | **100%** / 80% / 0% | **1280** / 1839 | **0.78** / 0.56 | **13%** / 42% | 100% |
+
+CB-ELE breached the 5 m limit 0 times at every size, during the mission and after arrival.
+
+**CB-ELE, v0.7 → v0.8:**
+
+| N | Success | Order | Rounds split | Single-leader share |
+|---|---|---|---|---|
+| 10 | 100% → 100% | 0.83 → 0.86 | 5% → **26%** (worse) | 85% → **68%** (worse) |
+| 20 | 80% → **100%** | 0.84 → 0.87 | 17% → **2%** | 65% → **91%** |
+| 30 | 80% → **100%** | 0.81 → 0.83 | 15% → **23%** (worse) | 91% → **74%** (worse) |
+| 50 | 100% → 100% | 0.78 → 0.83 | 29% → **5%** | 64% → **74%** |
+| 80 | 20% → **100%** | 0.16 → **0.78** | 7% → 13% | 21% → **65%** |
+
+**Findings.**
+- CB-ELE now succeeds in every run at every size (25 of 25). It is the fastest method at
+  every size, flat at about 1300–1430 rounds, and the best aligned from 20 drones up.
+- The trade-off is that because moving drones no longer hold candidates back, more
+  candidates promote themselves. On some seeds this gives longer periods with several
+  leaders and more splitting: 2 of 5 seeds at 10 and at 30 drones are split for about
+  56–67% of rounds.
+- With 5 seeds a success rate moves in steps of 20%. These are trends.
+- The main 100-seed benchmark (30 drones, `results/comparison_*.csv`) was run before v0.7
+  and v0.8, so it does not include these changes.
+
+## v0.7, 5 seeds per size (superseded)
 
 **Command:**
 `python compare.py --seeds 5 --rounds 3000 --sizes 10,20,30,50,80 --informed 0.3 --prefix scalability`,
