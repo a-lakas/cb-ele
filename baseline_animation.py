@@ -189,7 +189,8 @@ def main(method, argv=None):
     metrics_path = os.path.join(args.output_dir, f"{method}_metrics.csv")
     table.to_csv(metrics_path, index=False, float_format="%.6f")
     summary = trajectory_metrics(traj, config, args.arrival_radius)
-    for key in ("election_time", "unique_leader_fraction", "leader_changes"):
+    for key in ("election_time", "unique_leader_fraction", "leader_changes",
+                "single_leader_at_end"):
         summary.pop(key)                         # CB-ELE-only metrics
     summary = pd.Series({"method": method, "seed": args.seed,
                          "informed_fraction": args.informed, **summary})

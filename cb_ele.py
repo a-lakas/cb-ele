@@ -232,6 +232,12 @@ class Config:
     # that of 30 drones in 20 m x 90 m (60 m^2 per drone) at every size.
     spawn_area_per_agent: float = 60.0
 
+    # Goal settling (v0.7): every drone carries the goal (any drone may be
+    # elected leader).  Inside this radius a drone starts no new election
+    # (no challenger watchdog, candidates/challengers revert to followers)
+    # and informed followers stop pushing towards the goal point.  0 = off.
+    goal_settle_radius: float = 100.0
+
     # Performance knobs ------------------------------------------------------
     hard_safety_iterations: int = 80
     use_scipy_cdist: bool = True
@@ -859,13 +865,25 @@ def run_simulation(config=CONFIG, return_trajectory=False):
 
         # --- State transitions ---
         previous_state = state.copy()
+        settled = ((config.goal_settle_radius > 0)
+                   & (np.linalg.norm(position - goal, axis=1)
+                      <= config.goal_settle_radius))
         coherence_all = vectorized_local_coherence(heading, neighbors)
 
         for i in range(n):
             has_neighbors = bool(neighbors[i].any())
             coherence = float(coherence_all[i])
 
-            if previous_state[i] == CANDIDATE:
+            if settled[i] and previous_state[i] in (CANDIDATE, CHALLENGER, DORMANT):
+                # v0.7: arrived -> no new elections at the goal
+                state[i] = FOLLOWER
+                confidence[i] = 0
+                challenger_timer[i] = 0
+                anomaly_counter[i] = 0
+                duel_active[i] = False
+                duel_timer[i] = np.inf
+                event_log.append((round_number, i, "goal_settle"))
+            elif previous_state[i] == CANDIDATE:
                 if not has_neighbors:
                     state[i], confidence[i] = DORMANT, 0
                 elif promotion_cooldown[i] > 0:      # v4.4: ex-leader cooldown
@@ -894,7 +912,8 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                     anomaly_counter[i] = 0
                 else:
                     anomalous = (
-                        state_age[i] >= config.collision_window
+                        not settled[i]
+                        and state_age[i] >= config.collision_window
                         and collision_rate[i] >= config.collision_rate_threshold
                         and coherence <= config.challenger_coherence_threshold
                     )
@@ -963,7 +982,8 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                         config.alignment_weight * local_alignment(i, heading, neighbors)
                         + config.cohesion_weight * keep_connected
                         + config.separation_weight * close_avoidance
-                        + config.follower_goal_weight * informed[i] * goal_direction
+                        + config.follower_goal_weight * informed[i]
+                        * (not settled[i]) * goal_direction
                     )
                     b = belief[i]
                     if config.leader_recognition == "follow" and b >= 0:

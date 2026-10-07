@@ -108,6 +108,10 @@ def trajectory_metrics(traj, config, arrival_radius, hold_rounds=30):
     held = np.flatnonzero(run == hold_rounds)
     row["election_time"] = int(held[0]) if len(held) else np.nan
     row["unique_leader_fraction"] = float(unique[:end].mean())
+    # After arrival (v0.7): does the swarm stay safe and settled at the goal?
+    row["post_arrival_breaches"] = (int(breaches[end:].sum())
+                                    if t_c is not None else np.nan)
+    row["single_leader_at_end"] = bool(leaders[-1] == 1)
     row["leader_changes"] = int(np.count_nonzero(
         np.any(np.diff(state == LEADER, axis=0), axis=1)))
     return row
@@ -126,7 +130,8 @@ def run_one(task):
             method=method, informed_fraction=informed))
     row = trajectory_metrics(traj, cfg, arrival_radius)
     if method != "cb-ele":
-        for key in ("election_time", "unique_leader_fraction", "leader_changes"):
+        for key in ("election_time", "unique_leader_fraction", "leader_changes",
+                    "single_leader_at_end"):
             row[key] = np.nan
     row.update(method=method, informed_fraction=informed, seed=seed,
                n_agents=n_agents, arrival_radius=arrival_radius, runtime_s=time.perf_counter() - t0)
