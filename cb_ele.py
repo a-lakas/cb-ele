@@ -1,6 +1,13 @@
 """CB-ELE v4.4: collision election with mid-run re-election experiment.
 
-Repository version: v0.5.
+Repository version: v0.6.
+
+v0.6
+----
+- Leader recognition adds per-round slowness evidence (the leader's gate and
+  tether make it slower than its neighbours); belief threshold 2 -> 5.
+  Recognition precision/recall 0.75/0.50 -> 0.86/0.88 (uninformed
+  followers, 100 seeds); mission outcomes unchanged within noise.
 
 v0.5
 ----

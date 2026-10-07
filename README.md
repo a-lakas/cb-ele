@@ -1,10 +1,11 @@
 # CB-ELE — Collision-Based Leader Election for GPS/communication-denied UAV swarms
 
-Current version **v0.5** (simulator CB-ELE v4.4: collision election,
+Current version **v0.6** (simulator CB-ELE v4.4: collision election,
 mid-distance re-election experiment, follower catch-up boost).
 
 | version | changes |
 |---|---|
+| v0.6 | leader recognition also uses slowness (the leader waits for the swarm): recall 0.50 → 0.88 |
 | v0.5 | behavioural leader recognition: followers infer and follow the leader from observed protocol behaviour ([details](docs/leader_recognition.md)) |
 | v0.4 | fully local duel resolution (no central arbitration, no global leader count) |
 | v0.3 | PACNav and Couzin baselines, common metrics from the paper review, 100-seed benchmark, per-baseline animation scripts |

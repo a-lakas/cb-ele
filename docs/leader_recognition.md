@@ -71,3 +71,58 @@ Per-seed results are in `results/recognition_test.csv`.
   chosen from a small sweep on seeds 42 and 0.
 - **The weights are hand-set.** Learning them, or using a likelihood model of the
   protocol's states, could raise recall.
+
+## v0.6: slowness evidence
+
+**Which behaviours give the leader away?** `recognition_features.py` measures, per drone
+and per round, behaviours that any neighbour could observe. It then scores how well each
+one separates leaders from followers (AUC: 0.5 means no information, 1 means perfect).
+Results are from 12 runs, followers 0% and 30% informed, saved in
+`results/recognition_features.csv`.
+
+| Observable behaviour (long-memory average) | AUC, leader vs follower |
+|---|---|
+| **Moves slower than its neighbours** (the leader waits for the swarm) | **0.95** |
+| Freezes when touched | 0.95 |
+| Never backs away when touched | 0.93 |
+| Does not yield to drones within 12 m | 0.78 |
+| Flies toward its neighbours | 0.77 |
+| Heading persistence; position at the front of the swarm | weak (leaders are, if anything, behind) |
+
+Slowness comes from the leader's own rules: it slows down when the swarm lags behind
+(gate) or when its nearest neighbour is far (tether). Unlike freezing, it is visible
+**every round**, not only when the leader is touched.
+
+**What changed in v0.6.**
+- Each round, every visible neighbour j earns
+  `0.5 · (mean speed of the observer's visible neighbours − speed of j) / v_max`.
+- The belief threshold rises from 2 to 5.
+
+### Result
+
+`recognition_compare.py`, 100 seeds, saved in `results/recognition_v05_vs_v06.csv`.
+
+| | uninformed v0.5 | uninformed v0.6 | 30% informed v0.5 | 30% informed v0.6 |
+|---|---|---|---|---|
+| Recognition precision | 0.75 | **0.86** | 0.78 | **0.86** |
+| Recognition recall | 0.50 | **0.88** | 0.64 | **0.89** |
+| Success | 73% | 78% | 95% | 97% |
+| Split at the end | 22% | 15% | 5% | 3% |
+| Rounds with the swarm split | 20% | 16% | 11% | 12% |
+| Median completion time (rounds) | 1392 | 1412 | 1333 | 1341 |
+| Time until one leader holds (rounds) | 96 | 129 | 113 | 124 |
+
+- **Recognition improves a lot:** recall rises by 0.25–0.38 and precision by about 0.1.
+- **Mission outcomes do not change significantly.** These are paired seed-by-seed tests:
+
+  | Followers | Success flips (fail→success / success→fail) | Success p | Split-time p (Wilcoxon) |
+  |---|---|---|---|
+  | uninformed | +24 / −19 | 0.54 | 0.44 |
+  | 30% informed | +5 / −3 | 0.73 | 0.87 |
+
+- **Conclusion:** followers now find the leader correctly about 9 times in 10, so
+  recognition is no longer the bottleneck. The remaining failures, mostly a swarm that ends
+  split when followers are uninformed, come from elsewhere: drones that are out of the
+  leader's sensing range, and the leader's own pace.
+- v0.6 stays the default because the recognition claim is much stronger. The cost is a
+  slightly later single leader.
