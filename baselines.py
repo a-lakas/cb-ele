@@ -90,10 +90,7 @@ def run_baseline(config=cb_ele.CONFIG, bcfg=BaselineConfig()):
     n = cfg.n_agents
     goal = np.array([cfg.width - 5.0, cfg.height / 2.0])
     # Same RNG draw order as cb_ele.run_simulation -> identical start state.
-    position = np.column_stack((
-        rng.uniform(5.0, 25.0, n),
-        rng.uniform(5.0, cfg.height - 5.0, n),
-    ))
+    position = cb_ele.initial_positions(rng, cfg)
     heading = rng.uniform(-np.pi, np.pi, n)
     informed = _informed_mask(n, bcfg.informed_fraction, rng)
     method_state = {}

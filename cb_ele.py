@@ -228,6 +228,10 @@ class Config:
     reelection_seed_mode: str = "goal_side"  # v0.2: "goal_side" | "peripheral"
     reelection_block_ex_leader_rounds: int = 180
 
+    # Start area (v0.7): depth along x grows with N so the start density is
+    # that of 30 drones in 20 m x 90 m (60 m^2 per drone) at every size.
+    spawn_area_per_agent: float = 60.0
+
     # Performance knobs ------------------------------------------------------
     hard_safety_iterations: int = 80
     use_scipy_cdist: bool = True
@@ -260,6 +264,17 @@ def _as_config(config):
     if isinstance(config, dict):
         return Config(**{**asdict(CONFIG), **config})
     return config
+
+
+def initial_positions(rng, config):
+    """Start positions shared by CB-ELE and the baselines (same RNG draws)."""
+    n = config.n_agents
+    span_y = config.height - 10.0
+    depth = config.spawn_area_per_agent * n / span_y
+    return np.column_stack((
+        rng.uniform(5.0, 5.0 + depth, n),
+        rng.uniform(5.0, config.height - 5.0, n),
+    ))
 
 
 # =============================================================================
@@ -665,10 +680,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
     rng = np.random.default_rng(config.seed)
     n = config.n_agents
     goal = np.array([config.width - 5.0, config.height / 2.0])
-    position = np.column_stack((
-        rng.uniform(5.0, 25.0, n),
-        rng.uniform(5.0, config.height - 5.0, n),
-    ))
+    position = initial_positions(rng, config)
     heading = rng.uniform(-np.pi, np.pi, n)
 
     state = np.full(n, CANDIDATE, dtype=int)
