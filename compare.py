@@ -30,6 +30,9 @@ def trajectory_metrics(traj, config, arrival_radius, hold_rounds=30):
     """Common metrics (docs/metrics.md) from a trajectory dict."""
     pos, vel, goal = traj["position"], traj["velocity"], traj["goal"]
     state = traj["state"]
+    if "dead" in traj and traj["dead"].any():       # crashed drones excluded
+        keep = ~traj["dead"]
+        pos, vel, state = pos[:, keep], vel[:, keep], state[:, keep]
     rounds, n, _ = pos.shape
     centroid = pos.mean(axis=1)
     agent_goal = np.linalg.norm(pos - goal, axis=2)

@@ -734,6 +734,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
     score = np.zeros((n, n))                       # score[i, j]: i's view of j
     belief = np.full(n, -1)                        # i's believed leader
     had_leader = np.zeros(n, dtype=bool)           # v0.8: watchdog armed
+    dead = np.zeros(n, dtype=bool)                 # crashed drones (removed)
     contacts_prev = np.zeros((n, n), dtype=bool)   # contacts at last round start
     hover_prev = np.zeros(n, dtype=bool)           # hovering two motions ago
     recog_precision = np.full(config.rounds, np.nan)
@@ -762,6 +763,8 @@ def run_simulation(config=CONFIG, return_trajectory=False):
         previous_centroid = position.mean(axis=0).copy()
         distance = pairwise_distances(position, use_scipy=use_scipy)
         np.fill_diagonal(distance, np.inf)
+        distance[dead, :] = np.inf                  # crashed drones are gone
+        distance[:, dead] = np.inf
         neighbors = distance <= config.sensing_radius
         election_contacts = distance <= config.election_radius
         contact_now = election_contacts.any(axis=1)
@@ -797,6 +800,15 @@ def run_simulation(config=CONFIG, return_trajectory=False):
             leader_age[failed] = 0
             duel_active[failed] = False
             duel_timer[failed] = np.inf
+            # v0.8: a crash removes the drone; it is parked at the start
+            # corner, invisible to the others, and never rejoins.
+            dead[failed] = True
+            position[failed] = np.array([0.0, 0.0])
+            distance[failed, :] = np.inf
+            distance[:, failed] = np.inf
+            neighbors = distance <= config.sensing_radius
+            election_contacts = distance <= config.election_radius
+            contact_now = election_contacts.any(axis=1)
             for i in failed:
                 event_log.append((round_number, int(i), "leader_failure"))
 
@@ -1143,6 +1155,8 @@ def run_simulation(config=CONFIG, return_trajectory=False):
 
         distance = pairwise_distances(position, use_scipy=use_scipy)
         np.fill_diagonal(distance, np.inf)
+        distance[dead, :] = np.inf                  # crashed drones are gone
+        distance[:, dead] = np.inf
         neighbors = distance <= config.sensing_radius
         election_contacts = distance <= config.election_radius
         coherence_all = vectorized_local_coherence(heading, neighbors)
@@ -1195,7 +1209,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
 
     if return_trajectory:
         trajectory = {"position": traj_position, "velocity": traj_velocity,
-                      "state": traj_state, "goal": goal}
+                      "state": traj_state, "goal": goal, "dead": dead.copy()}
         return display_frames, goal, table, events_df, transitions_df, trajectory
     return display_frames, goal, table, events_df, transitions_df
 
