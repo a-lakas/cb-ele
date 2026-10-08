@@ -93,7 +93,7 @@ def _couzin_desired(i, position, heading, distance, neighbors, informed,
             d = np.array([np.cos(heading[i]), np.sin(heading[i])])
     d = unit(d)
     if informed[i]:
-        d = unit(d + bcfg.couzin_omega * unit(goal - position[i]))
+        d = unit(d + bcfg.couzin_omega * unit(goal[i] - position[i]))
     return d
 
 
@@ -108,6 +108,10 @@ def run_baseline(config=cb_ele.CONFIG, bcfg=BaselineConfig()):
     heading = rng.uniform(-np.pi, np.pi, n)
     informed = _informed_mask(n, bcfg.informed_fraction, rng)
     method_state = {}
+    # v0.9 goal drift: same per-drone drift directions as CB-ELE (same seed).
+    drift_angle = np.random.default_rng([cfg.seed, 2]).uniform(-np.pi, np.pi, n)
+    drift_dir = np.column_stack((np.cos(drift_angle), np.sin(drift_angle)))
+    flown = np.zeros(n)
 
     traj_position = np.zeros((cfg.rounds, n, 2))
     traj_velocity = np.zeros((cfg.rounds, n, 2))
@@ -118,22 +122,23 @@ def run_baseline(config=cb_ele.CONFIG, bcfg=BaselineConfig()):
         distance = pairwise_distances(position)
         np.fill_diagonal(distance, np.inf)
         neighbors = distance <= cfg.sensing_radius
+        goal_est = goal + cfg.goal_drift * flown[:, None] * drift_dir
 
         if bcfg.method == "couzin":
             desired = np.array([
                 _couzin_desired(i, position, heading, distance, neighbors,
-                                informed, goal, cfg, bcfg)
+                                informed, goal_est, cfg, bcfg)
                 for i in range(n)])
             speed = np.full(n, bcfg.speed)
             max_turn = bcfg.turn_rate
         elif bcfg.method == "petracek":
             desired, speed = _petracek_step(position, distance, neighbors,
-                                            informed, goal, cfg, bcfg,
+                                            informed, goal_est, cfg, bcfg,
                                             method_state)
             max_turn = np.pi                 # holonomic, velocity-controlled
         elif bcfg.method == "pacnav":
             desired, speed = _pacnav_step(position, heading, distance,
-                                          neighbors, informed, goal, cfg,
+                                          neighbors, informed, goal_est, cfg,
                                           bcfg, method_state, r)
             max_turn = np.pi                 # holonomic, velocity-controlled
         else:
@@ -141,7 +146,7 @@ def run_baseline(config=cb_ele.CONFIG, bcfg=BaselineConfig()):
 
         # ADAPT: informed agents hold position once at the goal, like the
         # CB-ELE leader's anchor rule, so arrival can be measured.
-        at_goal = informed & (np.linalg.norm(goal - position, axis=1)
+        at_goal = informed & (np.linalg.norm(goal_est - position, axis=1)
                               <= cfg.goal_arrival_radius)
         speed = np.where(at_goal, 0.0, speed)
 
@@ -154,6 +159,7 @@ def run_baseline(config=cb_ele.CONFIG, bcfg=BaselineConfig()):
         position = enforce_hard_safety(position + velocity, cfg)
         traj_position[r] = position
         traj_velocity[r] = position - previous
+        flown += np.linalg.norm(position - previous, axis=1)
 
     return {"position": traj_position, "velocity": traj_velocity,
             "state": traj_state, "goal": goal, "informed": informed}
@@ -185,7 +191,7 @@ def _petracek_step(position, distance, neighbors, informed, goal, cfg, bcfg,
             v_rel = prev_v[ids] - prev_v[i]
             f[i] = np.mean(x + v_rel / lam - kappa[:, None] * x, axis=0)
         if informed[i]:
-            f[i] += bcfg.petracek_goal_gain * unit(goal - position[i]) / lam
+            f[i] += bcfg.petracek_goal_gain * unit(goal[i] - position[i]) / lam
     norm = np.linalg.norm(f, axis=1)
     speed = np.minimum(cfg.max_speed, lam * norm)
     desired = np.where(norm[:, None] > 1e-9, f / np.maximum(norm, 1e-9)[:, None],
@@ -234,7 +240,7 @@ def _pacnav_step(position, heading, distance, neighbors, informed, goal,
     for i in range(n):
         ids = np.flatnonzero(neighbors[i])
         if informed[i]:
-            d[i] = goal
+            d[i] = goal[i]
         else:
             d[i] = position[i]                      # q0: alone, no motion
             if L >= 3 and len(ids):

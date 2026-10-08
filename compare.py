@@ -121,9 +121,9 @@ def trajectory_metrics(traj, config, arrival_radius, hold_rounds=30):
 
 
 def run_one(task):
-    method, informed, seed, rounds, arrival_radius, n_agents = task
+    method, informed, seed, rounds, arrival_radius, n_agents, drift = task
     cfg = replace(cb_ele.CONFIG, seed=seed, rounds=rounds, n_agents=n_agents,
-                  verbose_timing=False, show_inline=False)
+                  goal_drift=drift, verbose_timing=False, show_inline=False)
     t0 = time.perf_counter()
     if method == "cb-ele":
         cfg = replace(cfg, follower_informed_fraction=informed)
@@ -137,7 +137,8 @@ def run_one(task):
                     "single_leader_at_end"):
             row[key] = np.nan
     row.update(method=method, informed_fraction=informed, seed=seed,
-               n_agents=n_agents, arrival_radius=arrival_radius, runtime_s=time.perf_counter() - t0)
+               n_agents=n_agents, arrival_radius=arrival_radius,
+               goal_drift=drift, runtime_s=time.perf_counter() - t0)
     return row
 
 
@@ -153,6 +154,9 @@ def main(argv=None):
     parser.add_argument("--sizes", default=str(cb_ele.CONFIG.n_agents),
                         help="comma-separated swarm sizes; R_g scales as "
                              "arrival_radius * sqrt(N / 30) so the swarm fits")
+    parser.add_argument("--drift", default="0",
+                        help="comma-separated goal-drift levels (fraction of "
+                             "distance flown)")
     parser.add_argument("--prefix", default="comparison",
                         help="output file prefix")
     parser.add_argument("--workers", type=int, default=os.cpu_count())
@@ -160,7 +164,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     tasks = [(m, float(p), s, args.rounds,
-              args.arrival_radius * np.sqrt(int(n) / 30.0), int(n))
+              args.arrival_radius * np.sqrt(int(n) / 30.0), int(n), float(dr))
+             for dr in args.drift.split(",")
              for n in args.sizes.split(",")
              for p in args.informed.split(",")
              for m in args.methods.split(",")
@@ -179,14 +184,14 @@ def main(argv=None):
                       flush=True)
 
     table = pd.DataFrame(rows)
-    front = ["n_agents", "informed_fraction", "method", "seed"]
+    front = ["goal_drift", "n_agents", "informed_fraction", "method", "seed"]
     table = table[front + [c for c in table.columns if c not in front]]
     os.makedirs(args.output_dir, exist_ok=True)
     per_seed = os.path.join(args.output_dir, f"{args.prefix}_per_seed.csv")
     table.to_csv(per_seed, index=False, float_format="%.4f")
 
     grouped = table.drop(columns="seed").groupby(
-        ["n_agents", "informed_fraction", "method"], sort=False)
+        ["goal_drift", "n_agents", "informed_fraction", "method"], sort=False)
     summary = grouped.agg(["mean", "std"])
     summary.columns = [f"{a}_{b}" for a, b in summary.columns]
     summary_path = os.path.join(args.output_dir, f"{args.prefix}_summary.csv")

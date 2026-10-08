@@ -1,6 +1,17 @@
 """CB-ELE v4.4: collision election with mid-run re-election experiment.
 
-Repository version: v0.8.
+Repository version: v0.9.
+
+v0.9
+----
+- Leader-vanish detection: a follower whose recognized leader disappears
+  from well inside its sensing range becomes challenger (crash recovery).
+- Leader recognition threshold re-tuned for v0.8 behavior: 5 -> 2
+  (held-out seeds 1000-1003).
+- goal_drift: per-drone goal-estimate drift proportional to distance
+  flown (GPS-free odometry bias), shared with the baselines.
+- Leader crash removes the drone (parked, invisible, never rejoins).
+
 
 v0.8
 ----
@@ -182,7 +193,7 @@ class Config:
                                              # moving slower than the observer's
                                              # visible neighbours (the leader's
                                              # gate/tether make it wait)
-    recognition_threshold: float = 5.0
+    recognition_threshold: float = 2.0       # v0.9: re-tuned (seeds 1000-1003)
     recognition_cap: float = 50.0
     recognition_follow_weight: float = 3.0
     passive_backoff_min: int = 4
@@ -258,6 +269,17 @@ class Config:
     # hover; followers keep moving.  A touch by a moving drone neither
     # resets a candidate's quiet rounds nor holds it in a duel.
     rival_requires_hover: bool = True
+    # v0.9: a follower whose recognized leader vanishes from well inside its
+    # sensing range (closer than R_s - 2 v_max last round, so it cannot have
+    # flown out of range) treats the leader as lost and becomes challenger.
+    leader_vanish_detection: bool = True
+
+    # v0.9: GPS-free goal drift.  Each drone's goal estimate is offset by
+    # goal_drift x (distance it has flown) in a fixed random direction (an
+    # odometry bias, e.g. 0.01 = 1 % of distance).  Applies to every drone that
+    # steers to the goal (leader, informed followers, baselines' informed
+    # agents) and to goal settling; success is measured on the true goal.
+    goal_drift: float = 0.0
 
     # Performance knobs ------------------------------------------------------
     hard_safety_iterations: int = 80
@@ -735,6 +757,10 @@ def run_simulation(config=CONFIG, return_trajectory=False):
     belief = np.full(n, -1)                        # i's believed leader
     had_leader = np.zeros(n, dtype=bool)           # v0.8: watchdog armed
     dead = np.zeros(n, dtype=bool)                 # crashed drones (removed)
+    belief_dist = np.full(n, np.inf)               # v0.9: distance to belief
+    drift_angle = np.random.default_rng([config.seed, 2]).uniform(-np.pi, np.pi, n)
+    drift_dir = np.column_stack((np.cos(drift_angle), np.sin(drift_angle)))
+    flown = np.zeros(n)                            # distance flown per drone
     contacts_prev = np.zeros((n, n), dtype=bool)   # contacts at last round start
     hover_prev = np.zeros(n, dtype=bool)           # hovering two motions ago
     recog_precision = np.full(config.rounds, np.nan)
@@ -821,7 +847,14 @@ def run_simulation(config=CONFIG, return_trajectory=False):
         # expiring.  Timers expiring within the latency both withdraw.
         hovering = observed_speed < config.hover_speed_threshold
 
+        vanished = np.zeros(n, dtype=bool)
         if config.leader_recognition != "off":
+            # v0.9: did the recognized leader vanish from well inside range?
+            had_belief = np.flatnonzero(belief >= 0)
+            vanished[had_belief] = (
+                (belief_dist[had_belief]
+                 < config.sensing_radius - 2.0 * config.max_speed)
+                & ~neighbors[had_belief, belief[had_belief]])
             # Events of the last motion step, as seen from outside.
             touched = contacts_prev.any(axis=1)
             freeze = touched & hovering
@@ -846,6 +879,9 @@ def run_simulation(config=CONFIG, return_trajectory=False):
             belief = np.where(masked[np.arange(n), best]
                               >= config.recognition_threshold, best, -1)
             had_leader |= (state == FOLLOWER) & (belief >= 0)
+            belief_dist = np.where(belief >= 0,
+                                   distance[np.arange(n), np.maximum(belief, 0)],
+                                   np.inf)
             followers = state == FOLLOWER
             is_leader = state == LEADER
             sees_leader = followers & (neighbors & is_leader[None, :]).any(axis=1)
@@ -913,10 +949,11 @@ def run_simulation(config=CONFIG, return_trajectory=False):
             event = "candidate_withdraw" if previous == CANDIDATE else "leader_withdraw"
             event_log.append((round_number, int(loser), event))
 
+        goal_est = goal + config.goal_drift * flown[:, None] * drift_dir   # v0.9
         # --- State transitions ---
         previous_state = state.copy()
         settled = ((config.goal_settle_radius > 0)
-                   & (np.linalg.norm(position - goal, axis=1)
+                   & (np.linalg.norm(position - goal_est, axis=1)
                       <= config.goal_settle_radius))
         coherence_all = vectorized_local_coherence(heading, neighbors)
 
@@ -960,6 +997,17 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                 if not has_neighbors:
                     state[i] = DORMANT
                     anomaly_counter[i] = 0
+                elif (config.leader_vanish_detection and vanished[i]
+                      and not settled[i]):
+                    # v0.9: the recognized leader vanished -> re-elect
+                    state[i] = CHALLENGER
+                    challenger_timer[i] = rng.integers(
+                        config.challenger_delay_min, config.challenger_delay_max + 1)
+                    anomaly_counter[i] = 0
+                    had_leader[i] = False
+                    belief[i] = -1
+                    belief_dist[i] = np.inf
+                    event_log.append((round_number, i, "leader_vanished"))
                 else:
                     anomalous = (
                         not settled[i]
@@ -1030,7 +1078,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
                 else:
                     speed_sample = np.concatenate(([observed_speed[i]], observed_speed[ids]))
                     local_speed = float(np.clip(speed_sample.mean(), 0.0, config.max_speed))
-                    goal_direction = unit(goal - position[i])
+                    goal_direction = unit(goal_est[i] - position[i])
                     desired[i] = (
                         config.alignment_weight * local_alignment(i, heading, neighbors)
                         + config.cohesion_weight * keep_connected
@@ -1059,11 +1107,11 @@ def run_simulation(config=CONFIG, return_trajectory=False):
             elif state[i] == LEADER:
                 # v0.4: no global leader count; duplicate leaders meet during
                 # validation or at the goal and settle it in a duel.
-                distance_to_goal = float(np.linalg.norm(goal - position[i]))
+                distance_to_goal = float(np.linalg.norm(goal_est[i] - position[i]))
                 auditing = leader_is_auditing(leader_age[i], distance_to_goal, config)
                 audit_mask[i] = auditing
                 noise_allowed[i] = False
-                goal_direction = unit(goal - position[i])
+                goal_direction = unit(goal_est[i] - position[i])
                 goal_angle = np.arctan2(goal_direction[1], goal_direction[0])
                 if distance_to_goal <= config.leader_anchor_radius:
                     heading[i] = goal_angle
@@ -1131,8 +1179,8 @@ def run_simulation(config=CONFIG, return_trajectory=False):
 
         leader_mask = state == LEADER
         if leader_mask.any():                       # v0.4: per leader, local
-            dx = goal[0] - position[leader_mask, 0]
-            dy = goal[1] - position[leader_mask, 1]
+            dx = goal_est[leader_mask, 0] - position[leader_mask, 0]
+            dy = goal_est[leader_mask, 1] - position[leader_mask, 1]
             safe = np.hypot(dx, dy) > 1e-6
             if safe.any():
                 heading[np.flatnonzero(leader_mask)[safe]] = np.arctan2(dy[safe], dx[safe])
@@ -1142,6 +1190,7 @@ def run_simulation(config=CONFIG, return_trajectory=False):
         observed_speed = actual_speed.copy()
 
         position = enforce_hard_safety(position, config)
+        flown += np.linalg.norm(position - position_before, axis=1)
 
         at_x_wall = (position[:, 0] <= 0.0) | (position[:, 0] >= config.width)
         at_y_wall = (position[:, 1] <= 0.0) | (position[:, 1] >= config.height)

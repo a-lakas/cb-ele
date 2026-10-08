@@ -45,7 +45,7 @@ def run(task):
     informed[rng.choice(n, int(round(p * n)), replace=False)] = True
     cfg = SimpleNamespace(sensing_radius=RHO)
     bcfg = SimpleNamespace(repulsion_radius=ALPHA, couzin_omega=OMEGA)
-    far_goal = lambda: pos.mean(axis=0) + 1e9 * G    # makes unit(goal - x) = g
+    far_goal = lambda: np.tile(pos.mean(axis=0) + 1e9 * G, (n, 1))  # unit(goal_i - x_i) = g
     track = []
     for _ in range(STEPS):
         d = pairwise_distances(pos)

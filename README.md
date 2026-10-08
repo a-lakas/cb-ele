@@ -1,10 +1,11 @@
 # CB-ELE — Collision-Based Leader Election for GPS/communication-denied UAV swarms
 
-Current version **v0.8** (simulator CB-ELE v4.4: collision election,
+Current version **v0.9** (simulator CB-ELE v4.4: collision election,
 mid-distance re-election experiment, follower catch-up boost).
 
 | version | changes |
 |---|---|
+| v0.9 | leader-vanish detection (crash recovery), recognition re-tuned, GPS-free goal-drift model, ablations.py |
 | v0.8 | only hovering drones count as rivals (fixes election deadlock in dense swarms); watchdog armed only after a leader was recognised |
 | v0.7 | start area grows with swarm size; no new elections at the goal |
 | v0.6 | leader recognition also uses slowness (the leader waits for the swarm): recall 0.50 → 0.88 |
