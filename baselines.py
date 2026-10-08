@@ -161,6 +161,8 @@ def _petracek_step(position, distance, neighbors, informed, goal, cfg, bcfg,
                    method_state):
     """Petracek et al. (2020) Boids model for UAVs without communication.
 
+    UNTESTED: not yet calibrated or validated; not in compare.py defaults.
+
     f_b = 1/|N| sum_j [x_ij + v_ij/lambda - kappa(x_ij, R_n) x_ij]   (eq. 4)
     kappa(x, r) = max(0, sqrt(s/|x|) - sqrt(s/r))   (eq. 5, length scale s)
     f = f_b + v_n/lambda, v_n = goal attraction for informed agents  (eqs. 3, 6)
