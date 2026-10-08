@@ -6,9 +6,12 @@
 
 1. **Only a hovering drone counts as a rival** (`rival_requires_hover`).
    - Duelling contenders hover; followers keep moving.
-   - A touch by a moving drone no longer resets a candidate's quiet rounds.
-   - A duel ends, and the candidate survives, if one round after contact no touching
-     drone is hovering.
+   - A round counts as quiet only if no touching drone is hovering, so a moving
+     drone that keeps touching a candidate no longer blocks its quiet rounds.
+   - A *new* contact still opens a duel, which resets the quiet count. That duel ends,
+     and the candidate survives, if one round after contact no touching drone is
+     hovering, so a passing follower costs a candidate about two rounds, not the
+     whole election.
    - This is the fix that matters. In a dense crowd, followers brushing past kept every
      candidate frozen and its quiet count at zero, so no leader could emerge.
 2. **The "leader lost" watchdog runs only after the follower has recognised a leader**
