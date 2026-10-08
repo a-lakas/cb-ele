@@ -43,6 +43,12 @@ class BaselineConfig:
                                              # n/c ratio of eq. 11 under scaling
     pacnav_alpha: float = 8.0                # Alg. 3 exponent (code)
     pacnav_min_scale: float = 0.3            # V^m in eq. 15 (code)
+    # Petracek et al. (2020), eqs. 4-8.  The paper gives no numeric values;
+    # kappa gets a length scale so the pairwise equilibrium (kappa = 1)
+    # lies at CB-ELE's 15 m preferred spacing with R_n = 35 m.
+    petracek_rate: float = 1.0               # lambda [Hz]: one update per round
+    petracek_length_scale: float = 125.7     # s: sqrt(s/d) - sqrt(s/R_n) = 1 at d = 15 m
+    petracek_goal_gain: float = 1.5          # |v_n| [m/s] for informed agents
     pacnav_history: int = 6                  # K^p, path samples (>= 3)
     pacnav_lookahead: float = 1.5 / 1.2      # |a_n - p|: the A* waypoint is a
                                              # short step ahead; K^n * step =
@@ -63,7 +69,14 @@ def _turn_towards(heading, desired_angle, max_turn):
 
 def _couzin_desired(i, position, heading, distance, neighbors, informed,
                     goal, cfg, bcfg):
-    """Couzin et al. (2005) direction rule for agent i (unit vector)."""
+    """Couzin et al. (2005) direction rule for agent i (unit vector).
+
+    Eqs. 57-59 as restated by Vicsek & Zafeiris (2012, sec. 5.4):
+    repulsion from neighbours within alpha has priority (eq. 57); otherwise
+    d = sum_j (r_j - r_i)/|r_j - r_i| + sum_j v_j/|v_j| over neighbours
+    j != i within rho (eq. 58, plain sums); informed agents use
+    (d_hat + omega g) / |d_hat + omega g| (eq. 59).
+    """
     too_close = np.flatnonzero(distance[i] < bcfg.repulsion_radius)
     if len(too_close):
         d = -np.sum([unit(position[j] - position[i]) for j in too_close], axis=0)
@@ -73,8 +86,7 @@ def _couzin_desired(i, position, heading, distance, neighbors, informed,
             d_att = np.sum([unit(position[j] - position[i]) for j in ids], axis=0)
             d_ori = np.sum(np.column_stack((np.cos(heading[ids]),
                                             np.sin(heading[ids]))), axis=0)
-            d_ori += np.array([np.cos(heading[i]), np.sin(heading[i])])
-            d = unit(d_att) + unit(d_ori)
+            d = d_att + d_ori                       # v0.8 fix: eq. 58 sums
         else:
             d = np.array([np.cos(heading[i]), np.sin(heading[i])])
     d = unit(d)
@@ -112,6 +124,11 @@ def run_baseline(config=cb_ele.CONFIG, bcfg=BaselineConfig()):
                 for i in range(n)])
             speed = np.full(n, bcfg.speed)
             max_turn = bcfg.turn_rate
+        elif bcfg.method == "petracek":
+            desired, speed = _petracek_step(position, distance, neighbors,
+                                            informed, goal, cfg, bcfg,
+                                            method_state)
+            max_turn = np.pi                 # holonomic, velocity-controlled
         elif bcfg.method == "pacnav":
             desired, speed = _pacnav_step(position, heading, distance,
                                           neighbors, informed, goal, cfg,
@@ -138,6 +155,39 @@ def run_baseline(config=cb_ele.CONFIG, bcfg=BaselineConfig()):
 
     return {"position": traj_position, "velocity": traj_velocity,
             "state": traj_state, "goal": goal, "informed": informed}
+
+
+def _petracek_step(position, distance, neighbors, informed, goal, cfg, bcfg,
+                   method_state):
+    """Petracek et al. (2020) Boids model for UAVs without communication.
+
+    f_b = 1/|N| sum_j [x_ij + v_ij/lambda - kappa(x_ij, R_n) x_ij]   (eq. 4)
+    kappa(x, r) = max(0, sqrt(s/|x|) - sqrt(s/r))   (eq. 5, length scale s)
+    f = f_b + v_n/lambda, v_n = goal attraction for informed agents  (eqs. 3, 6)
+    v = min(v_m, lambda |f|) f/|f|                                 (eqs. 7-8)
+    Relative velocities v_ij use the neighbours' previous velocities.
+    """
+    n = len(position)
+    lam, s_len = bcfg.petracek_rate, bcfg.petracek_length_scale
+    r_n = cfg.sensing_radius
+    prev_v = method_state.setdefault("prev_v", np.zeros((n, 2)))
+    f = np.zeros((n, 2))
+    for i in range(n):
+        ids = np.flatnonzero(neighbors[i])
+        if len(ids):
+            x = position[ids] - position[i]
+            d = np.maximum(distance[i, ids], 1e-6)
+            kappa = np.maximum(0.0, np.sqrt(s_len / d) - np.sqrt(s_len / r_n))
+            v_rel = prev_v[ids] - prev_v[i]
+            f[i] = np.mean(x + v_rel / lam - kappa[:, None] * x, axis=0)
+        if informed[i]:
+            f[i] += bcfg.petracek_goal_gain * unit(goal - position[i]) / lam
+    norm = np.linalg.norm(f, axis=1)
+    speed = np.minimum(cfg.max_speed, lam * norm)
+    desired = np.where(norm[:, None] > 1e-9, f / np.maximum(norm, 1e-9)[:, None],
+                       np.zeros((n, 2)))
+    method_state["prev_v"] = speed[:, None] * desired
+    return desired, speed
 
 
 def _cosines(a, b):
