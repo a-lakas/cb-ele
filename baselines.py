@@ -44,11 +44,13 @@ class BaselineConfig:
     pacnav_alpha: float = 8.0                # Alg. 3 exponent (code)
     pacnav_min_scale: float = 0.3            # V^m in eq. 15 (code)
     # Petracek et al. (2020), eqs. 4-8.  The paper gives no numeric values;
-    # kappa gets a length scale so the pairwise equilibrium (kappa = 1)
-    # lies at CB-ELE's 15 m preferred spacing with R_n = 35 m.
+    # kappa gets a length scale s, calibrated on held-out seeds 1000-1001 so
+    # the swarm's median nearest-neighbour distance is ~15 m (CB-ELE's
+    # preferred spacing); the goal gain was tuned on seeds 1000-1004.
     petracek_rate: float = 1.0               # lambda [Hz]: one update per round
-    petracek_length_scale: float = 125.7     # s: sqrt(s/d) - sqrt(s/R_n) = 1 at d = 15 m
-    petracek_goal_gain: float = 1.5          # |v_n| [m/s] for informed agents
+    petracek_length_scale: float = 2500.0    # s: swarm nearest-neighbour distance
+                                             # ~15 m for 30 drones (seeds 1000-1001)
+    petracek_goal_gain: float = 10.0         # |v_n| for informed agents (tuned)
     pacnav_history: int = 6                  # K^p, path samples (>= 3)
     pacnav_lookahead: float = 1.5 / 1.2      # |a_n - p|: the A* waypoint is a
                                              # short step ahead; K^n * step =
@@ -161,7 +163,7 @@ def _petracek_step(position, distance, neighbors, informed, goal, cfg, bcfg,
                    method_state):
     """Petracek et al. (2020) Boids model for UAVs without communication.
 
-    UNTESTED: not yet calibrated or validated; not in compare.py defaults.
+    Calibrated on held-out seeds (1000-1004): length scale s and goal gain.
 
     f_b = 1/|N| sum_j [x_ij + v_ij/lambda - kappa(x_ij, R_n) x_ij]   (eq. 4)
     kappa(x, r) = max(0, sqrt(s/|x|) - sqrt(s/r))   (eq. 5, length scale s)

@@ -23,7 +23,7 @@ import baselines
 from cb_ele import pairwise_distances, components, LEADER
 
 
-METHODS = ("cb-ele", "couzin", "pacnav")
+METHODS = ("cb-ele", "couzin", "pacnav", "petracek")
 
 
 def trajectory_metrics(traj, config, arrival_radius, hold_rounds=30):
