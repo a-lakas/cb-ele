@@ -145,6 +145,8 @@ def run_one(task):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--seeds", type=int, default=100)
+    parser.add_argument("--seed-start", type=int, default=0,
+                        help="first seed (seeds seed_start .. seed_start+seeds-1)")
     parser.add_argument("--rounds", type=int, default=3000)
     parser.add_argument("--informed", default="1.0,0.3",
                         help="comma-separated informed fractions")
@@ -169,7 +171,7 @@ def main(argv=None):
              for n in args.sizes.split(",")
              for p in args.informed.split(",")
              for m in args.methods.split(",")
-             for s in range(args.seeds)]
+             for s in range(args.seed_start, args.seed_start + args.seeds)]
     rows = []
     t0 = time.perf_counter()
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
