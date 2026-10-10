@@ -1,0 +1,29 @@
+name: Tag release from VERSION
+
+# On every push to main, create the tag named in VERSION (e.g. v0.9) on the
+# pushed commit if that tag does not exist yet.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create tag
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "Tag $VERSION already exists"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$VERSION" -m "CB-ELE $VERSION"
+            git push origin "refs/tags/$VERSION"
+          fi

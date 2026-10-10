@@ -56,6 +56,11 @@ This runs CB-ELE, PACNav (Ahmad et al. 2022) and Couzin et al. (2005) on identic
 Metric definitions are in [`docs/metrics.md`](docs/metrics.md), and the paper notes are in
 [`docs/paper_review.md`](docs/paper_review.md).
 
+## Development log
+
+The full development conversation (requests, decisions, results; tool output omitted) is in
+[`docs/conversation.md`](docs/conversation.md), exported with `tools/export_conversation.py`.
+
 ## Related work
 
 Scalability (swarm size 10–80, single seed): [`docs/scalability.md`](docs/scalability.md).
